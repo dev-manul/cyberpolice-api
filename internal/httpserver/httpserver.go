@@ -3,6 +3,7 @@ package httpserver
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"go.uber.org/fx"
 
@@ -62,17 +64,24 @@ func SubmitHandler(m mailer.Mailer) http.Handler {
 			return
 		}
 
-		rawBody, _ := io.ReadAll(io.LimitReader(r.Body, 64*1024))
+		rawBody, _ := io.ReadAll(io.LimitReader(r.Body, 256*1024))
 		r.Body.Close()
 		r.Body = io.NopCloser(bytes.NewBuffer(rawBody))
 
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, "bad request", http.StatusBadRequest)
-			return
-		}
+		if isJSONRequest(r.Header.Get("Content-Type")) {
+			if err := parseJSONBody(r.Form, rawBody); err != nil {
+				http.Error(w, "bad request", http.StatusBadRequest)
+				return
+			}
+		} else {
+			if err := r.ParseForm(); err != nil {
+				http.Error(w, "bad request", http.StatusBadRequest)
+				return
+			}
 
-		if r.Form.Get("urgency") == "" || r.Form.Get("summary") == "" {
-			mergePlainBodyPairs(r.Form, rawBody)
+			if r.Form.Get("urgency") == "" || r.Form.Get("summary") == "" {
+				mergePlainBodyPairs(r.Form, rawBody)
+			}
 		}
 
 		if err := validateForm(r.Form); err != nil {
@@ -168,5 +177,64 @@ func mergePlainBodyPairs(dst url.Values, raw []byte) {
 			i++
 		}
 		dst.Add(key, val)
+	}
+}
+
+func isJSONRequest(contentType string) bool {
+	contentType = strings.ToLower(strings.TrimSpace(contentType))
+	return strings.HasPrefix(contentType, "application/json")
+}
+
+func parseJSONBody(dst url.Values, raw []byte) error {
+	if len(raw) == 0 {
+		return errors.New("empty body")
+	}
+
+	var data map[string]any
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return err
+	}
+
+	for key, value := range data {
+		switch v := value.(type) {
+		case string:
+			if v != "" {
+				dst.Add(key, v)
+			}
+		case []any:
+			for _, item := range v {
+				s := formatValue(item)
+				if s != "" {
+					dst.Add(key, s)
+				}
+			}
+		default:
+			s := formatValue(v)
+			if s != "" {
+				dst.Add(key, s)
+			}
+		}
+	}
+
+	return nil
+}
+
+func formatValue(v any) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	case float64:
+		return fmt.Sprintf("%v", t)
+	case bool:
+		if t {
+			return "yes"
+		}
+		return "no"
+	default:
+		text := fmt.Sprintf("%v", t)
+		if !utf8.ValidString(text) {
+			return ""
+		}
+		return text
 	}
 }
