@@ -18,6 +18,7 @@ import (
 	"go.uber.org/fx"
 
 	"cyberpolice-api/internal/config"
+	"cyberpolice-api/internal/geoip"
 	"cyberpolice-api/internal/mailer"
 	"cyberpolice-api/internal/ratelimit"
 	"cyberpolice-api/internal/telegrambot"
@@ -37,8 +38,8 @@ func NewServer(cfg config.Config, mux *http.ServeMux) *http.Server {
 	}
 }
 
-func RegisterRoutes(mux *http.ServeMux, cfg config.Config, mailer mailer.Mailer, limiter *ratelimit.IPRateLimiter) {
-	handler := ratelimit.Middleware(limiter, SubmitHandler(mailer))
+func RegisterRoutes(mux *http.ServeMux, cfg config.Config, mailer mailer.Mailer, limiter *ratelimit.IPRateLimiter, geo *geoip.Resolver) {
+	handler := ratelimit.Middleware(limiter, SubmitHandler(mailer, geo))
 	mux.Handle("/submit", handler)
 	mux.Handle("/submib", handler)
 	mux.Handle("/telegram/webhook", telegrambot.NewWebhookHandler(cfg))
@@ -58,7 +59,7 @@ func Start(lc fx.Lifecycle, srv *http.Server) {
 	})
 }
 
-func SubmitHandler(m mailer.Mailer) http.Handler {
+func SubmitHandler(m mailer.Mailer, geo *geoip.Resolver) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -99,7 +100,9 @@ func SubmitHandler(m mailer.Mailer) http.Handler {
 		}
 
 		body := buildEmailBody(r.Form)
-		body = appendRequesterIP(body, r)
+		ip := firstForwardedIP(r)
+		body = appendRequesterIP(body, ip)
+		body = appendGeo(body, ip, geo)
 		if err := m.Send("new case", body); err != nil {
 			log.Printf("send message error: %v", err)
 			http.Error(w, "failed to send", http.StatusInternalServerError)
@@ -168,8 +171,7 @@ func buildEmailBody(values url.Values) string {
 	return b.String()
 }
 
-func appendRequesterIP(body string, r *http.Request) string {
-	ip := firstForwardedIP(r)
+func appendRequesterIP(body string, ip string) string {
 	if ip == "" {
 		return body
 	}
@@ -193,6 +195,23 @@ func firstForwardedIP(r *http.Request) string {
 		return host
 	}
 	return strings.TrimSpace(r.RemoteAddr)
+}
+
+func appendGeo(body, ip string, geo *geoip.Resolver) string {
+	if ip == "" || geo == nil {
+		return body
+	}
+	loc, ok := geo.Lookup(ip)
+	if !ok {
+		return body
+	}
+	if loc.Country != "" {
+		body += "Country: " + loc.Country + "\n"
+	}
+	if loc.City != "" {
+		body += "City: " + loc.City + "\n"
+	}
+	return body
 }
 
 func mergePlainBodyPairs(dst url.Values, raw []byte) {

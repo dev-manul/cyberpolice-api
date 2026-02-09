@@ -15,6 +15,7 @@ WORKDIR /app
 RUN adduser -D -H -s /sbin/nologin appuser
 
 COPY --from=builder /out/app /app/app
+COPY GeoLite2-City.mmdb /app/GeoLite2-City.mmdb
 COPY .env.example /app/.env.example
 
 USER appuser

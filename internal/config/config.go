@@ -14,6 +14,7 @@ type Config struct {
 	TelegramChatIDs       []string
 	TelegramWebhookURL    string
 	TelegramWebhookSecret string
+	GeoIPDBPath           string
 	ServerAddr            string
 	RateLimitRPS          float64
 	RateLimitBurst        int
@@ -26,6 +27,7 @@ func Load() (Config, error) {
 		TelegramBotToken:      strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN")),
 		TelegramWebhookURL:    strings.TrimSpace(os.Getenv("TELEGRAM_WEBHOOK_URL")),
 		TelegramWebhookSecret: strings.TrimSpace(os.Getenv("TELEGRAM_WEBHOOK_SECRET")),
+		GeoIPDBPath:           strings.TrimSpace(os.Getenv("GEOIP_DB_PATH")),
 		ServerAddr:            strings.TrimSpace(os.Getenv("SERVER_ADDR")),
 		RateLimitRPS:          1,
 		RateLimitBurst:        5,
@@ -44,6 +46,9 @@ func Load() (Config, error) {
 
 	if cfg.ServerAddr == "" {
 		cfg.ServerAddr = ":8080"
+	}
+	if cfg.GeoIPDBPath == "" {
+		cfg.GeoIPDBPath = "GeoLite2-City.mmdb"
 	}
 
 	if v := strings.TrimSpace(os.Getenv("RATE_LIMIT_RPS")); v != "" {

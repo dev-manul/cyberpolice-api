@@ -4,6 +4,7 @@ import (
 	"go.uber.org/fx"
 
 	"cyberpolice-api/internal/config"
+	"cyberpolice-api/internal/geoip"
 	"cyberpolice-api/internal/httpserver"
 	"cyberpolice-api/internal/mailer"
 	"cyberpolice-api/internal/ratelimit"
@@ -14,6 +15,7 @@ func main() {
 	fx.New(
 		fx.Provide(
 			config.Load,
+			geoip.NewResolver,
 			mailer.NewTelegramSender,
 			ratelimit.NewIPRateLimiter,
 			httpserver.NewMux,
