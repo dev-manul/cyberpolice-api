@@ -74,6 +74,9 @@ func SubmitHandler(m mailer.Mailer) http.Handler {
 		r.Body = io.NopCloser(bytes.NewBuffer(rawBody))
 
 		if isJSONRequest(r.Header.Get("Content-Type")) {
+			if r.Form == nil {
+				r.Form = make(url.Values)
+			}
 			if err := parseJSONBody(r.Form, rawBody); err != nil {
 				http.Error(w, "bad request", http.StatusBadRequest)
 				return
