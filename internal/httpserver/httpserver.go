@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -98,6 +99,7 @@ func SubmitHandler(m mailer.Mailer) http.Handler {
 		}
 
 		body := buildEmailBody(r.Form)
+		body = appendRequesterIP(body, r)
 		if err := m.Send("new case", body); err != nil {
 			log.Printf("send message error: %v", err)
 			http.Error(w, "failed to send", http.StatusInternalServerError)
@@ -164,6 +166,33 @@ func buildEmailBody(values url.Values) string {
 	}
 
 	return b.String()
+}
+
+func appendRequesterIP(body string, r *http.Request) string {
+	ip := firstForwardedIP(r)
+	if ip == "" {
+		return body
+	}
+	return body + "\nIP: " + ip + "\n"
+}
+
+func firstForwardedIP(r *http.Request) string {
+	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+		parts := strings.Split(forwarded, ",")
+		for _, part := range parts {
+			ip := strings.TrimSpace(part)
+			if ip != "" {
+				return ip
+			}
+		}
+	}
+	if realIP := strings.TrimSpace(r.Header.Get("X-Real-IP")); realIP != "" {
+		return realIP
+	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return strings.TrimSpace(r.RemoteAddr)
 }
 
 func mergePlainBodyPairs(dst url.Values, raw []byte) {
