@@ -59,7 +59,12 @@ func Start(lc fx.Lifecycle, srv *http.Server) {
 
 func SubmitHandler(m mailer.Mailer) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if r.Method != http.MethodPost {
+			log.Printf("reject method=%s path=%s", r.Method, r.URL.Path)
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
