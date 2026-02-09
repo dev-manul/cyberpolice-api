@@ -17,6 +17,7 @@ import (
 	"cyberpolice-api/internal/config"
 	"cyberpolice-api/internal/mailer"
 	"cyberpolice-api/internal/ratelimit"
+	"cyberpolice-api/internal/telegrambot"
 )
 
 func NewMux() *http.ServeMux {
@@ -33,10 +34,11 @@ func NewServer(cfg config.Config, mux *http.ServeMux) *http.Server {
 	}
 }
 
-func RegisterRoutes(mux *http.ServeMux, mailer mailer.Mailer, limiter *ratelimit.IPRateLimiter) {
+func RegisterRoutes(mux *http.ServeMux, cfg config.Config, mailer mailer.Mailer, limiter *ratelimit.IPRateLimiter) {
 	handler := ratelimit.Middleware(limiter, SubmitHandler(mailer))
 	mux.Handle("/submit", handler)
 	mux.Handle("/submib", handler)
+	mux.Handle("/telegram/webhook", telegrambot.NewWebhookHandler(cfg))
 }
 
 func Start(lc fx.Lifecycle, srv *http.Server) {
@@ -148,26 +150,22 @@ func buildEmailBody(values url.Values) string {
 }
 
 func mergePlainBodyPairs(dst url.Values, raw []byte) {
-	text := strings.TrimSpace(string(raw))
-	if text == "" {
+	text := strings.ReplaceAll(string(raw), "\r\n", "\n")
+	if strings.TrimSpace(text) == "" {
 		return
 	}
 
 	lines := strings.Split(text, "\n")
-	normalized := make([]string, 0, len(lines))
-	for _, line := range lines {
-		value := strings.TrimSpace(line)
-		if value == "" {
+	for i := 0; i < len(lines); {
+		key := strings.TrimSpace(lines[i])
+		i++
+		if key == "" {
 			continue
 		}
-		normalized = append(normalized, value)
-	}
-
-	for i := 0; i+1 < len(normalized); i += 2 {
-		key := normalized[i]
-		val := normalized[i+1]
-		if key == "" || val == "" {
-			continue
+		val := ""
+		if i < len(lines) {
+			val = strings.TrimSpace(lines[i])
+			i++
 		}
 		dst.Add(key, val)
 	}

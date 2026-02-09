@@ -10,21 +10,25 @@ import (
 )
 
 type Config struct {
-	TelegramBotToken string
-	TelegramChatIDs  []string
-	ServerAddr       string
-	RateLimitRPS     float64
-	RateLimitBurst   int
+	TelegramBotToken      string
+	TelegramChatIDs       []string
+	TelegramWebhookURL    string
+	TelegramWebhookSecret string
+	ServerAddr            string
+	RateLimitRPS          float64
+	RateLimitBurst        int
 }
 
 func Load() (Config, error) {
 	_ = godotenv.Load()
 
 	cfg := Config{
-		TelegramBotToken: strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN")),
-		ServerAddr:       strings.TrimSpace(os.Getenv("SERVER_ADDR")),
-		RateLimitRPS:     1,
-		RateLimitBurst:   5,
+		TelegramBotToken:      strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN")),
+		TelegramWebhookURL:    strings.TrimSpace(os.Getenv("TELEGRAM_WEBHOOK_URL")),
+		TelegramWebhookSecret: strings.TrimSpace(os.Getenv("TELEGRAM_WEBHOOK_SECRET")),
+		ServerAddr:            strings.TrimSpace(os.Getenv("SERVER_ADDR")),
+		RateLimitRPS:          1,
+		RateLimitBurst:        5,
 	}
 
 	chatIDs := strings.TrimSpace(os.Getenv("TELEGRAM_CHAT_IDS"))
@@ -63,6 +67,9 @@ func Load() (Config, error) {
 	}
 	if len(cfg.TelegramChatIDs) == 0 {
 		return Config{}, fmt.Errorf("TELEGRAM_CHAT_IDS is required")
+	}
+	if cfg.TelegramWebhookURL == "" {
+		return Config{}, fmt.Errorf("TELEGRAM_WEBHOOK_URL is required")
 	}
 
 	return cfg, nil

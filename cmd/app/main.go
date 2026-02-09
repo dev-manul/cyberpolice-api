@@ -23,7 +23,7 @@ func main() {
 			ratelimit.StartCleanup,
 			httpserver.RegisterRoutes,
 			httpserver.Start,
-			telegrambot.StartPolling,
+			telegrambot.RegisterWebhook,
 		),
 	).Run()
 }

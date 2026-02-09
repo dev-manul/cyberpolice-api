@@ -1,12 +1,13 @@
 package telegrambot
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -14,11 +15,6 @@ import (
 
 	"cyberpolice-api/internal/config"
 )
-
-type updatesResponse struct {
-	OK     bool     `json:"ok"`
-	Result []update `json:"result"`
-}
 
 type update struct {
 	UpdateID int      `json:"update_id"`
@@ -34,84 +30,98 @@ type chat struct {
 	ID int64 `json:"id"`
 }
 
-func StartPolling(lc fx.Lifecycle, cfg config.Config) {
+type webhookResponse struct {
+	OK bool `json:"ok"`
+}
+
+type setWebhookRequest struct {
+	URL         string `json:"url"`
+	SecretToken string `json:"secret_token,omitempty"`
+}
+
+func RegisterWebhook(lc fx.Lifecycle, cfg config.Config) {
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
-			go pollUpdates(ctx, cfg.TelegramBotToken)
-			return nil
+			return setWebhook(ctx, cfg)
 		},
 	})
 }
 
-func pollUpdates(ctx context.Context, token string) {
-	client := &http.Client{Timeout: 70 * time.Second}
-	offset := 0
-
-	for {
-		select {
-		case <-ctx.Done():
+func NewWebhookHandler(cfg config.Config) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
-		default:
 		}
 
-		updates, err := getUpdates(ctx, client, token, offset)
+		if cfg.TelegramWebhookSecret != "" {
+			secret := r.Header.Get("X-Telegram-Bot-Api-Secret-Token")
+			if secret != cfg.TelegramWebhookSecret {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+		}
+
+		body, err := io.ReadAll(io.LimitReader(r.Body, 256*1024))
 		if err != nil {
-			log.Printf("telegram getUpdates error: %v", err)
-			time.Sleep(2 * time.Second)
-			continue
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
 		}
 
-		for _, upd := range updates {
-			if upd.UpdateID >= offset {
-				offset = upd.UpdateID + 1
-			}
-			if upd.Message == nil {
-				continue
-			}
+		var upd update
+		if err := json.Unmarshal(body, &upd); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
 
+		if upd.Message != nil {
 			text := strings.TrimSpace(upd.Message.Text)
-			if text == "" {
-				continue
-			}
-
 			if strings.HasPrefix(text, "/myid") {
 				log.Printf("telegram chat id: %d", upd.Message.Chat.ID)
 			}
 		}
-	}
+
+		w.WriteHeader(http.StatusOK)
+	})
 }
 
-func getUpdates(ctx context.Context, client *http.Client, token string, offset int) ([]update, error) {
-	values := url.Values{}
-	values.Set("timeout", "25")
-	if offset > 0 {
-		values.Set("offset", fmt.Sprintf("%d", offset))
+func setWebhook(ctx context.Context, cfg config.Config) error {
+	payload := setWebhookRequest{
+		URL:         cfg.TelegramWebhookURL,
+		SecretToken: cfg.TelegramWebhookSecret,
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
 	}
 
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates?%s", token, values.Encode())
-	reqCtx, cancel := context.WithTimeout(ctx, 70*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
+	client := &http.Client{Timeout: 10 * time.Second}
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/setWebhook", cfg.TelegramBotToken)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(data))
 	if err != nil {
-		return nil, err
+		return err
 	}
+	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("status=%d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("setWebhook error: status=%d body=%s", resp.StatusCode, string(body))
 	}
 
-	var payload updatesResponse
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, err
+	var result webhookResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return err
 	}
-	if !payload.OK {
-		return nil, fmt.Errorf("telegram response not ok")
+	if !result.OK {
+		return fmt.Errorf("setWebhook response not ok")
 	}
-	return payload.Result, nil
+
+	return nil
 }
