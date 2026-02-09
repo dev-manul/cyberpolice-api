@@ -64,16 +64,3 @@ jobs:
     outputs:
       digest: ${{ steps.build.outputs.digest }}
 
-  deploy:
-    runs-on: ubuntu-latest
-    needs: build
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-    steps:
-      - name: Deploy to k3s via Proxmox jump host
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.PROXMOX_HOST }}
-          username: deploy
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          script: |
-            ssh -o StrictHostKeyChecking=accept-new deploy@192.168.100.14 "sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml /usr/local/bin/kubectl -n cyberpolice set image deployment/cyberpolice-api cyberpolice-api=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }} && sudo KUBECONFIG=/etc/rancher/k3s/k3s.yaml /usr/local/bin/kubectl -n cyberpolice rollout status deployment/cyberpolice-api --timeout=120s"
