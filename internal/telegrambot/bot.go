@@ -44,7 +44,7 @@ func StartPolling(lc fx.Lifecycle, cfg config.Config) {
 }
 
 func pollUpdates(ctx context.Context, token string) {
-	client := &http.Client{Timeout: 40 * time.Second}
+	client := &http.Client{Timeout: 70 * time.Second}
 	offset := 0
 
 	for {
@@ -83,13 +83,15 @@ func pollUpdates(ctx context.Context, token string) {
 
 func getUpdates(ctx context.Context, client *http.Client, token string, offset int) ([]update, error) {
 	values := url.Values{}
-	values.Set("timeout", "30")
+	values.Set("timeout", "25")
 	if offset > 0 {
 		values.Set("offset", fmt.Sprintf("%d", offset))
 	}
 
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates?%s", token, values.Encode())
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	reqCtx, cancel := context.WithTimeout(ctx, 70*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
