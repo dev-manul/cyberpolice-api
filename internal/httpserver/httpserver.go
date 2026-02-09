@@ -1,9 +1,11 @@
 package httpserver
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -58,9 +60,17 @@ func SubmitHandler(m mailer.Mailer) http.Handler {
 			return
 		}
 
+		rawBody, _ := io.ReadAll(io.LimitReader(r.Body, 64*1024))
+		r.Body.Close()
+		r.Body = io.NopCloser(bytes.NewBuffer(rawBody))
+
 		if err := r.ParseForm(); err != nil {
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
+		}
+
+		if r.Form.Get("urgency") == "" || r.Form.Get("summary") == "" {
+			mergePlainBodyPairs(r.Form, rawBody)
 		}
 
 		if err := validateForm(r.Form); err != nil {
@@ -135,4 +145,30 @@ func buildEmailBody(values url.Values) string {
 	}
 
 	return b.String()
+}
+
+func mergePlainBodyPairs(dst url.Values, raw []byte) {
+	text := strings.TrimSpace(string(raw))
+	if text == "" {
+		return
+	}
+
+	lines := strings.Split(text, "\n")
+	normalized := make([]string, 0, len(lines))
+	for _, line := range lines {
+		value := strings.TrimSpace(line)
+		if value == "" {
+			continue
+		}
+		normalized = append(normalized, value)
+	}
+
+	for i := 0; i+1 < len(normalized); i += 2 {
+		key := normalized[i]
+		val := normalized[i+1]
+		if key == "" || val == "" {
+			continue
+		}
+		dst.Add(key, val)
+	}
 }
